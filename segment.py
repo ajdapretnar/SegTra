@@ -73,9 +73,20 @@ class BoldReader(Reader):
         mask = self.style_mask(document, type='bold')
         return mask[i + 1]
 
+class ListReader(Reader):
+    """docx module does not handle list numbering, so the reader considers
+    chunks as List Paragraph sections separated by empty lines"""
+    def __init__(self, document):
+        super().__init__(document)
+
+    def join_condition(self, document, i):
+        # determine if next paragraph is empty
+        return not document.paragraphs[i + 1].text
+
+
 
 READERS = {'NameReader': NameReader, 'ItalicReader': ItalicReader,
-           'BoldReader': BoldReader}
+           'BoldReader': BoldReader, 'ListReader': ListReader}
 
 class Segmenter:
     def __init__(self):
@@ -94,7 +105,8 @@ class Segmenter:
     def sniff_type(self, document):
         "Check first five paragraphs in a document to determine the reader."
         regex = '\w+:'
-        reader = {'NameReader': 0, 'ItalicReader': 0, 'BoldReader': 0}
+        reader = {'NameReader': 0, 'ItalicReader': 0, 'BoldReader': 0,
+                  'ListReader': 0}
         for i in range(5):
             if re.match(regex, document.paragraphs[i].text):
                 reader['NameReader'] += 1
@@ -109,6 +121,8 @@ class Segmenter:
                 reader['ItalicReader'] += 1
             if b:
                 reader['BoldReader'] += 1
+            if document.paragraphs[i].style.name == 'List Paragraph':
+                reader['ListReader'] += 1
         if max(reader) == 0:
             raise TypeError("File cannot be read.")
         else:
@@ -136,5 +150,5 @@ class Segmenter:
 
 
 s = Segmenter()
-s.read('/folder/to/read/')
-s.save_data('/path/to/save/file.csv')
+s.read('/Users/ajda/Desktop/test/')
+s.save_data('/Users/ajda/Desktop/Segmentirano.csv')
