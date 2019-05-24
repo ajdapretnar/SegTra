@@ -4,49 +4,33 @@ import re
 
 import docx
 import pandas as pd
+pd.options.mode.chained_assignment = None  # default='warn'
 
-from simple_distance import simple_distance
-
+from similarity import aq_distance, chunk_distance, aq_cosine, chunk_cosine
 
 class Reader:
     def __init__(self, document):
         self.document = document
 
-    def join_condition(self, document, i):
+    def question(self, paragraph):
         raise NotImplementedError
 
-    def join_q_and_a(self, remove=False):
-        joined_lines = []
-        temp_content = []
+    def join_q_and_a(self):
+        questions = []
+        answers = []
+        a = []
         for i, row in enumerate(self.document.paragraphs):
-            if not row.text:
-                continue
-            if i < len(self.document.paragraphs) - 1 and \
-                    self.join_condition(self.document, i):
-                temp_content.append(row.text.strip(" "))
-                if remove:
-                    del temp_content[0]
-                joined_lines.append('\n'.join(temp_content))
-                temp_content.clear()
+            if self.question(row):
+                if a:
+                    answers.append("\n".join(a))
+                a = []
+                questions.append(row.text)
             else:
-                temp_content.append(row.text)
-        if temp_content:
-            joined_lines.append('\n'.join(temp_content))
-        return joined_lines
+                a.append(row.text)
+        if a:
+            answers.append("\n".join(a))
+        return questions, answers
 
-    def style_mask(self, doc, type=None):
-        if type is None:
-            return
-        mask = []
-        for para in doc.paragraphs:
-            count = False
-            for run in para.runs:
-                if type == 'italic' and run.italic:
-                    count = True
-                if type == 'bold' and run.bold:
-                    count = True
-            mask.append(count)
-        return mask
 
 class NameReader(Reader):
     def __init__(self, document):
@@ -54,8 +38,8 @@ class NameReader(Reader):
         self.q_label = self.determine_label(self.document)
         self.document = self.remove_empty_paragraphs(document)
 
-    def join_condition(self, document, i):
-        return document.paragraphs[i + 1].text.startswith(self.q_label)
+    def question(self, paragraph):
+        return paragraph.text.startswith(self.q_label)
 
     def determine_label(self, document):
         regex = '\w+:'
@@ -73,27 +57,29 @@ class ItalicReader(Reader):
     def __init__(self, document):
         super().__init__(document)
 
-    def join_condition(self, document, i):
-        mask = self.style_mask(document, type='italic')
-        return mask[i + 1]
+    def question(self, paragraph):
+        for run in paragraph.runs:
+            if run.italic:
+                return True
+        return
 
 class BoldReader(Reader):
     def __init__(self, document):
         super().__init__(document)
 
-    def join_condition(self, document, i):
-        mask = self.style_mask(document, type='bold')
-        return mask[i + 1]
+    def question(self, paragraph):
+        for run in paragraph.runs:
+            if run.bold:
+                return True
+        return
 
 class ListReader(Reader):
-    """docx module does not handle list numbering, so the reader considers
-    chunks as List Paragraph sections separated by empty lines"""
     def __init__(self, document):
         super().__init__(document)
 
-    def join_condition(self, document, i):
-        # determine if next paragraph is empty
-        return not document.paragraphs[i + 1].text
+    def question(self, paragraph):
+        # returns True if the paragraph is a list item
+        return paragraph._p.pPr.numPr is not None
 
 
 READERS = {'NameReader': NameReader, 'ItalicReader': ItalicReader,
@@ -121,7 +107,7 @@ class Segmenter:
         regex = '\w+:'
         reader = {'NameReader': 0, 'ItalicReader': 0, 'BoldReader': 0,
                   'ListReader': 0}
-        for i in range(5):
+        for i in range(min(5, len(document.paragraphs))):
             if re.match(regex, document.paragraphs[i].text):
                 reader['NameReader'] += 1
             i = False
@@ -145,26 +131,39 @@ class Segmenter:
     def read(self, folder, remove=False):
         self.remove = remove
         paths = self.get_paths(folder)
-        corpus = {'File': [], 'Content': []}
+        corpus = {'File': [], 'Questions': [], 'Answers': []}
         for path in paths:
             with open(path, 'rb') as f:
                 doc = docx.Document(f)
                 reader = self.sniff_type(doc)
-                r = reader(doc)
-                content = r.join_q_and_a(remove=remove)
-                for i in content:
+                try:
+                    print(path)
+                    r = reader(doc)
+                except:
+                    n = os.path.basename(path)
+                    TypeError(f"{n} cannot be read.")
+                    continue
+                q, a = r.join_q_and_a()
+                for q, a in zip(q, a):
                     corpus['File'].append(path)
-                    corpus['Content'].append(i)
+                    corpus['Questions'].append(q)
+                    corpus['Answers'].append(a)
         self.corpus = pd.DataFrame.from_dict(corpus)
 
-    def segment(self):
+    def segment(self, method):
         files = sorted(set(self.corpus['File']))
         seg_corpus = []
         for i in files:
             subset = self.corpus[self.corpus['File'] == i]
-            seg_corpus.append(simple_distance(subset))
+            seg_corpus.append(method(subset))
         seg_corpus = pd.concat(seg_corpus)
         self.seg_corpus = seg_corpus
 
     def save_data(self, path):
         self.seg_corpus.to_csv(path, index=False)
+
+
+s = Segmenter()
+s.read('path/to/folder', remove=False)
+s.segment(aq_distance)
+s.save_data('segmented.csv')

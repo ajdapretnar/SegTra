@@ -8,10 +8,15 @@ from nltk.tokenize import RegexpTokenizer
 
 import ufal_udpipe as udpipe
 
-
 def remove_comments(corpus):
     regex = "\\((.*?)\\)"
-    corpus['Content'].apply(lambda x: re.sub(regex, '', x))
+    corpus['Questions'] = corpus['Questions'].apply(lambda x: re.sub(regex, '',
+                                                                   x))
+    corpus['Answers'] = corpus['Answers'].apply(lambda x: re.sub(regex, '', x))
+    regex2 = "\\[(.*?)\\]"
+    corpus['Questions'] = corpus['Questions'].apply(lambda x: re.sub(regex2,
+                                                                   '', x))
+    corpus['Answers'] = corpus['Answers'].apply(lambda x: re.sub(regex2, '', x))
     return corpus
 
 def tokenize(corpus):
@@ -20,7 +25,7 @@ def tokenize(corpus):
             corpus]
 
 def remove_stopwords(tokens):
-    stopwords = pickle.load(open('/cache/stopwords.pkl', 'rb'))
+    stopwords = pickle.load(open('cache/stopwords.pkl', 'rb'))
     stopwords.append('um')
     return [[token for token in doc if token not in stopwords] for doc in tokens]
 
@@ -56,22 +61,27 @@ def pos_tag(tokens):
 
 def make_dict():
     slovar = {}
-    with open('/utils/slovenian-colloquial-dict.txt',
-              'r') as f:
+    with open('utils/slovenian-colloquial-dict.txt', 'r') as f:
         for i in f.read().splitlines():
             slovar[i.split(', ')[0]] = i.split(', ')[1]
-    pickle.dump(slovar, open('/cache/slovar.pkl', 'wb'))
+    pickle.dump(slovar, open('cache/slovar.pkl', 'wb'))
 
 def make_stopwords():
-    with open('/utils/slovenian-stopwords.txt', 'r') as f:
+    with open('utils/slovenian-stopwords.txt', 'r') as f:
         pickle.dump([i.strip(' ') for i in f.read().splitlines()],
-                    open('/cache/stopwords.pkl', 'wb'))
+                    open('cache/stopwords.pkl', 'wb'))
 
 def preprocessing_pipeline(corpus):
     corpus = remove_comments(corpus)
-    tokens = pos_tag(lemmatize(standardize(remove_stopwords(tokenize(corpus[
-                                                                 'Content'])))))
-    tokens = [[token for token, tag in doc if tag in ['NOUN', 'VERB']] for doc
-              in tokens]
-    pickle.dump(tokens, open('/cache/tokens.pkl', 'wb'))
-    return corpus, tokens
+    q_tokens = pos_tag(lemmatize(standardize(remove_stopwords(tokenize(
+        corpus['Questions'])))))
+    q_tokens = [[token for token, tag in doc if tag in ['NOUN', 'VERB']] for doc
+              in q_tokens]
+    a_tokens = pos_tag(lemmatize(standardize(remove_stopwords(tokenize(
+        corpus['Answers'])))))
+    a_tokens = [[token for token, tag in doc if tag in ['NOUN', 'VERB']] for doc
+                in a_tokens]
+    # tokens = [q + a for q, a in zip(q_tokens, a_tokens)]
+    pickle.dump(q_tokens, open('cache/q_tokens.pkl', 'wb'))
+    pickle.dump(a_tokens, open('cache/a_tokens.pkl', 'wb'))
+    return corpus, q_tokens, a_tokens
